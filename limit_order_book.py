@@ -39,23 +39,53 @@ class LimitLevel:
     def __init__(self, order: Order):
         self.price = order.price
         self.orders = DoublyLinkedList()
-        self.orders.append(Node(order))
+        self.orders.append(Node(order.id))
         self.quantity = order.quantity
 
     def __str__(self):
         return f"LimitLevel(price={self.price}, {self.orders.head.__str__()})"
 
     def append(self, order: Order):
-        self.orders.append(Node(order))
-        self.quantity += order.quantity
+        self.orders.append(Node(order.id))
+
+    def pop_left(self) -> int:
+        return self.orders.pop_left().value
 
 
 class LimitOrderBook:
     def __init__(self):
+        # Contain LimitLevel objects keyed by price, which are doubly linked lists holding nodes, quantities and prices
+        # Each node contains an order ID, not the order itself
         self.bids = SortedDict()
         self.asks = SortedDict()
-        self.orders = set()
+
+        # Stores the actual orders, keyed by order id
+        self.orders = {}
+
+        # ID for the next order to be generated
         self.order_id = 0
+
+    def _pop_limit(self, limit_level: LimitLevel) -> int:
+        """
+        Utility function for the removal of the leftmost node from a limit tree
+        Manages increases and reductions to quantity
+        :param limit_level: a LimitLevel object
+        :return: integer of order id from popped object
+        """
+        res = limit_level.pop_left()
+        limit_level.quantity -= self.orders[res].quantity
+        return res
+
+    def _append_limit(self, limit_level: LimitLevel, order: Order):
+        """
+        Utility function for the addition of rightmost node in a limit tree
+        Manages increases and reductions to quantity
+        :param limit_level: a LimitLevel object
+        :param order: an Order object
+        :return: None
+        """
+        limit_level.append(order)
+        limit_level.quantity += order.quantity
 
     def _add_order(self, order: Order):
         if order.id in self.orders:
@@ -66,7 +96,7 @@ class LimitOrderBook:
 
         # Price level does not exist already
         if order.price not in order_tree:
-            self.orders.add(order.id)
+            self.orders[order.id] = order
             order_tree[order.price] = LimitLevel(order)
         else:
             # Check if bid crosses spread to match an ask
@@ -81,10 +111,22 @@ class LimitOrderBook:
                     return
 
             # Adds order id to order tracker
-            self.orders.add(order.id)
+            self.orders[order.id] = order
 
             # Adds bids to bid tree and asks to ask tree
-            order_tree[order.id].append(order)
+            self._append_limit(order_tree[order.id], order)
+
+    def _update_order(self, order: Order):
+        quantity_difference = self.orders[order.id].quantity - order.quantity
+        price_difference = self.orders[order.id].price - order.price
+        order_tree = self.bids if order.is_bid else self.asks
+
+        self.orders[order.id].quantity = order.quantity
+        order_tree[order.price].quantity -= quantity_difference
+
+        if price_difference != 0:
+            # TODO: Allow for price change updates
+            self.orders[order.id].price = order.price
 
     def bid(self, quantity: int, price: int):
         order = Order(True, quantity, price, self.order_id)
@@ -95,6 +137,19 @@ class LimitOrderBook:
         order = Order(False, quantity, price, self.order_id)
         self._add_order(order)
         self.order_id += 1
+
+    def update(self, order_id: int, price: int, quantity: int):
+        if quantity == 0:
+            self.cancel(order_id)
+        elif order_id in self.orders:
+            self.orders[order_id].price = price
+            self.orders[order_id].quantity = quantity
+        else:
+            raise LOBException("Attempted to update order which does not exist / no longer exists")
+
+    def cancel(self, order_id: int):
+        if order_id in self.orders:
+            del self.orders[order_id]
 
     def get_best_bid(self):
         try:
@@ -110,12 +165,32 @@ class LimitOrderBook:
 
     def match_orders(self, order: Order, best_value: LimitLevel):
         while best_value.quantity > 0 and order.quantity > 0:
-            head_order = best_value.orders.head
+            # Gets the order object from the LimitLevel's stored id
+            head_order = self.orders[best_value.orders.head.value]
             if order.quantity <= head_order.quantity:
-                order.quantity = 0
+                # Reduce quantity of the limit level and its head simultaneously
                 head_order -= order.quantity
+                best_value.quantity -= order.quantity
+                order.quantity = 0
             else:
-                ...
+                order.quantity -= head_order.quantity
+                head_order.quantity = 0
+
+            if head_order.quantity == 0:
+                # Remove empty order and remove its corresponding quantity
+                del self.orders[self._pop_limit(best_value)]
+
+            if best_value.quantity <= 0:
+                # delete order id from order_tree
+                order_tree = self.bids if order.is_bid else self.asks
+                del order_tree[best_value.price]
+
+        if order.quantity > 0:
+            if order.id in self.orders:
+                self._update_order(order)
+            else:
+                self._add_order(order)
+
 
 
 
