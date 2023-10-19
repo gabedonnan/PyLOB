@@ -128,28 +128,54 @@ class LimitOrderBook:
             # TODO: Allow for price change updates
             self.orders[order.id].price = order.price
 
-    def bid(self, quantity: int, price: int):
+    def bid(self, quantity: int, price: int) -> int:
         order = Order(True, quantity, price, self.order_id)
         self._add_order(order)
         self.order_id += 1
+        return order.id
 
-    def ask(self, quantity: int, price: int):
+    def ask(self, quantity: int, price: int) -> int:
         order = Order(False, quantity, price, self.order_id)
         self._add_order(order)
         self.order_id += 1
+        return order.id
 
-    def update(self, order_id: int, price: int, quantity: int):
+    def update(self, order_id: int, price: int, quantity: int) -> int | None:
+        """
+        Updates an order, retrieved by order id.
+        :param order_id: Order to update
+        :param price: Price to change order to, a change here will result in an order cancellation and re-adding
+        :param quantity: Quantity to change order to
+        :return: new order id if quantity > 0. May be the same as previous ID
+        """
         if quantity == 0:
             self.cancel(order_id)
         elif order_id in self.orders:
-            self.orders[order_id].price = price
-            self.orders[order_id].quantity = quantity
+            order_tree = self.bids if self.orders[order_id].is_bid else self.asks
+            price_difference = self.orders[order_id].price - price
+            # Manages price adjustment
+            if price_difference != 0:
+                # Adjusting price requires order be moved to a separate layer
+                # This is most easily done by deleting one order and creating a new one in a different price layer
+                order_adder = self.bid if self.orders[order_id].is_bid else self.ask
+                self.cancel(order_id)
+                new_id = order_adder(quantity, price)
+            else:
+                # Manages quantity adjustment
+                # Currently does not obey price-time priority on adjustment, may be changed to support this
+                quantity_difference = self.orders[order_id].quantity - quantity
+                self.orders[order_id].quantity = quantity
+                order_tree[price].quantity -= quantity_difference
+                new_id = order_id
+            return new_id
         else:
             raise LOBException("Attempted to update order which does not exist / no longer exists")
 
     def cancel(self, order_id: int):
         if order_id in self.orders:
             del self.orders[order_id]
+        else:
+            raise LOBException("Attempted to cancel order which does not exist / no longer exists")
 
     def get_best_bid(self):
         try:
