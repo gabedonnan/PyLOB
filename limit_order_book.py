@@ -117,16 +117,7 @@ class LimitOrderBook:
             self._append_limit(order_tree[order.id], order)
 
     def _update_order(self, order: Order):
-        quantity_difference = self.orders[order.id].quantity - order.quantity
-        price_difference = self.orders[order.id].price - order.price
-        order_tree = self.bids if order.is_bid else self.asks
-
-        self.orders[order.id].quantity = order.quantity
-        order_tree[order.price].quantity -= quantity_difference
-
-        if price_difference != 0:
-            # TODO: Allow for price change updates
-            self.orders[order.id].price = order.price
+        return self.update(order.id, order.price, order.quantity)
 
     def bid(self, quantity: int, price: int) -> int:
         order = Order(True, quantity, price, self.order_id)
@@ -146,7 +137,7 @@ class LimitOrderBook:
         :param order_id: Order to update
         :param price: Price to change order to, a change here will result in an order cancellation and re-adding
         :param quantity: Quantity to change order to
-        :return: new order id if quantity > 0. May be the same as previous ID
+        :return: New order id if quantity > 0 else None. May be the same as previous ID.
         """
         if quantity == 0:
             self.cancel(order_id)
@@ -173,7 +164,14 @@ class LimitOrderBook:
 
     def cancel(self, order_id: int):
         if order_id in self.orders:
+            order_tree = self.bids if self.orders[order_id].is_bid else self.asks
+            price_level = order_tree[self.orders[order_id].price]
+            price_level.quantity -= self.orders[order_id].quantity
+            if price_level.quantity <= 0:
+                # delete order id from order_tree
+                del order_tree[price_level.price]
             del self.orders[order_id]
+
         else:
             raise LOBException("Attempted to cancel order which does not exist / no longer exists")
 
