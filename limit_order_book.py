@@ -43,7 +43,7 @@ class LimitLevel:
         self.quantity = order.quantity
 
     def __str__(self):
-        return f"LimitLevel(price={self.price}, quantity={self.quantity}, {self.orders.head.__str__()})"
+        return f"LimitLevel(price={self.price}, quantity={self.quantity}, order_ids={self.orders.head.__str__()})"
 
     def __repr__(self):
         return self.__str__()
@@ -178,7 +178,7 @@ class LimitOrderBook:
             else:
                 # Manages quantity adjustment
                 quantity_difference = self.orders[order_id].quantity - quantity
-                # If quantity is reduced, the order may maintain order
+                # If quantity is reduced, the order of bids / asks are maintained
                 if quantity_difference >= 0:
                     self.orders[order_id].quantity = quantity
                     if price in order_tree:
@@ -202,9 +202,6 @@ class LimitOrderBook:
                 # delete order id from order_tree
                 del order_tree[price_level.price]
             del self.orders[order_id]
-
-        else:
-            raise LOBException("Attempted to cancel order which does not exist / no longer exists")
 
     def get_best_bid(self):
         try:
@@ -255,9 +252,3 @@ class LimitOrderBook:
                 self._update_order(order)
             else:
                 self._add_order(order)
-
-
-
-
-
-
