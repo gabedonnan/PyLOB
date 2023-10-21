@@ -153,11 +153,17 @@ class LimitOrderBook:
                 new_id = order_adder(quantity, price)
             else:
                 # Manages quantity adjustment
-                # Currently does not obey price-time priority on adjustment, may be changed to support this
                 quantity_difference = self.orders[order_id].quantity - quantity
-                self.orders[order_id].quantity = quantity
-                order_tree[price].quantity -= quantity_difference
-                new_id = order_id
+                # If quantity is reduced, the order may maintain order
+                if quantity_difference >= 0:
+                    self.orders[order_id].quantity = quantity
+                    order_tree[price].quantity -= quantity_difference
+                    new_id = order_id
+                else:
+                    # Obeys price-time priority, an increase in quantity means order is moved to back of queue
+                    order_adder = self.bid if self.orders[order_id].is_bid else self.ask
+                    self.cancel(order_id)
+                    new_id = order_adder(quantity, price)
             return new_id
         else:
             raise LOBException("Attempted to update order which does not exist / no longer exists")
@@ -190,7 +196,13 @@ class LimitOrderBook:
     def match_orders(self, order: Order, best_value: LimitLevel):
         while best_value.quantity > 0 and order.quantity > 0:
             # Gets the order object from the LimitLevel's stored id
-            head_order = self.orders[best_value.orders.head.value]
+            order_id = best_value.orders.head.value
+            if order_id in self.orders:
+                head_order = self.orders[best_value.orders.head.value]
+            else:
+                # Remove orders that have been cancelled
+                best_value.pop_left()
+                continue
             if order.quantity <= head_order.quantity:
                 # Reduce quantity of the limit level and its head simultaneously
                 head_order -= order.quantity
