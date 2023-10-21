@@ -138,7 +138,7 @@ class LimitOrderBook:
             if order.quantity > 0:
                 self.orders[order.id] = order
                 # Adds bids to bid tree and asks to ask tree
-                self._append_limit(order_tree[order.id], order)
+                self._append_limit(order_tree[order.price], order)
 
     def _update_order(self, order: Order):
         return self.update(order.id, order.price, order.quantity)
