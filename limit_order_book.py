@@ -43,7 +43,10 @@ class LimitLevel:
         self.quantity = order.quantity
 
     def __str__(self):
-        return f"LimitLevel(price={self.price}, {self.orders.head.__str__()})"
+        return f"LimitLevel(price={self.price}, quantity={self.quantity}, {self.orders.head.__str__()})"
+
+    def __repr__(self):
+        return self.__str__()
 
     def append(self, order: Order):
         self.orders.append(Node(order.id))
@@ -64,6 +67,16 @@ class LimitOrderBook:
 
         # ID for the next order to be generated
         self.order_id = 0
+
+    def __str__(self):
+        return f"""LimitOrderBook(
+            orders={self.orders}, 
+            bid_tree={self.bids}, 
+            ask_tree={self.asks}
+        )"""
+
+    def __repr__(self):
+        return self.__str__()
 
     def _pop_limit(self, limit_level: LimitLevel) -> int:
         """
@@ -97,24 +110,35 @@ class LimitOrderBook:
         # Price level does not exist already
         if order.price not in order_tree:
             self.orders[order.id] = order
-            order_tree[order.price] = LimitLevel(order)
-        else:
-            # Check if bid crosses spread to match an ask
+
             if order.is_bid and (best_ask := self.get_best_ask()) is not None:
-                if best_ask.price <= order.price:
+                if best_ask is not None and best_ask.price <= order.price:
                     self.match_orders(order, best_ask)
                     return
             # Check if ask crosses spread to match a bid
             elif not order.is_bid and (best_bid := self.get_best_bid()) is not None:
-                if best_bid.price >= order.price:
+                if best_bid is not None and best_bid.price >= order.price:
+                    self.match_orders(order, best_bid)
+                    return
+            if order.quantity > 0:
+                order_tree[order.price] = LimitLevel(order)
+        else:
+            # Check if bid crosses spread to match an ask
+            if order.is_bid and (best_ask := self.get_best_ask()) is not None:
+                if best_ask is not None and best_ask.price <= order.price:
+                    self.match_orders(order, best_ask)
+                    return
+            # Check if ask crosses spread to match a bid
+            elif not order.is_bid and (best_bid := self.get_best_bid()) is not None:
+                if best_bid is not None and best_bid.price >= order.price:
                     self.match_orders(order, best_bid)
                     return
 
             # Adds order id to order tracker
-            self.orders[order.id] = order
-
-            # Adds bids to bid tree and asks to ask tree
-            self._append_limit(order_tree[order.id], order)
+            if order.quantity > 0:
+                self.orders[order.id] = order
+                # Adds bids to bid tree and asks to ask tree
+                self._append_limit(order_tree[order.id], order)
 
     def _update_order(self, order: Order):
         return self.update(order.id, order.price, order.quantity)
@@ -157,7 +181,8 @@ class LimitOrderBook:
                 # If quantity is reduced, the order may maintain order
                 if quantity_difference >= 0:
                     self.orders[order_id].quantity = quantity
-                    order_tree[price].quantity -= quantity_difference
+                    if price in order_tree:
+                        order_tree[price].quantity -= quantity_difference
                     new_id = order_id
                 else:
                     # Obeys price-time priority, an increase in quantity means order is moved to back of queue
@@ -183,20 +208,24 @@ class LimitOrderBook:
 
     def get_best_bid(self):
         try:
-            return self.bids.peekitem()
+            return self.bids.peekitem()[1]
         except IndexError:
             return None
 
     def get_best_ask(self):
         try:
-            return self.asks.peekitem(0)
+            return self.asks.peekitem(0)[1]
         except IndexError:
             return None
 
     def match_orders(self, order: Order, best_value: LimitLevel):
-        while best_value.quantity > 0 and order.quantity > 0:
+        if best_value is None:
+            return
+        print(best_value)
+        while best_value.quantity > 0 and order.quantity > 0 and best_value.orders.head is not None:
             # Gets the order object from the LimitLevel's stored id
             order_id = best_value.orders.head.value
+            print(f"Order matched {order} and {self.orders[order_id]}")
             if order_id in self.orders:
                 head_order = self.orders[best_value.orders.head.value]
             else:
@@ -205,20 +234,20 @@ class LimitOrderBook:
                 continue
             if order.quantity <= head_order.quantity:
                 # Reduce quantity of the limit level and its head simultaneously
-                head_order -= order.quantity
+                head_order.quantity -= order.quantity
                 best_value.quantity -= order.quantity
                 order.quantity = 0
             else:
                 order.quantity -= head_order.quantity
+                best_value.quantity -= order.quantity
                 head_order.quantity = 0
 
             if head_order.quantity == 0:
                 # Remove empty order and remove its corresponding quantity
                 del self.orders[self._pop_limit(best_value)]
 
-            if best_value.quantity <= 0:
+            if best_value.quantity <= 0 and best_value.price in (order_tree := self.bids if order.is_bid else self.asks):
                 # delete order id from order_tree
-                order_tree = self.bids if order.is_bid else self.asks
                 del order_tree[best_value.price]
 
         if order.quantity > 0:
