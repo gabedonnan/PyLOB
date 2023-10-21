@@ -89,7 +89,8 @@ class LimitOrderBook:
         limit_level.quantity -= self.orders[res].quantity
         return res
 
-    def _append_limit(self, limit_level: LimitLevel, order: Order):
+    @staticmethod
+    def _append_limit(limit_level: LimitLevel, order: Order):
         """
         Utility function for the addition of rightmost node in a limit tree
         Manages increases and reductions to quantity
@@ -161,7 +162,7 @@ class LimitOrderBook:
         :param order_id: Order to update
         :param price: Price to change order to, a change here will result in an order cancellation and re-adding
         :param quantity: Quantity to change order to
-        :return: New order id if quantity > 0 else None. May be the same as previous ID.
+        :return: New order id if quantity > 0 else None. The result may be the same as previous ID.
         """
         if quantity == 0:
             self.cancel(order_id)
@@ -197,6 +198,7 @@ class LimitOrderBook:
         if order_id in self.orders:
             order_tree = self.bids if self.orders[order_id].is_bid else self.asks
             price_level = order_tree[self.orders[order_id].price]
+            # Remove quantity of removed order
             price_level.quantity -= self.orders[order_id].quantity
             if price_level.quantity <= 0:
                 # delete order id from order_tree
@@ -222,19 +224,20 @@ class LimitOrderBook:
         while best_value.quantity > 0 and order.quantity > 0 and best_value.orders.head is not None:
             # Gets the order object from the LimitLevel's stored id
             order_id = best_value.orders.head.value
-            print(f"Order matched {order} and {self.orders[order_id]}")
             if order_id in self.orders:
                 head_order = self.orders[best_value.orders.head.value]
             else:
                 # Remove orders that have been cancelled
                 best_value.pop_left()
                 continue
+
             if order.quantity <= head_order.quantity:
                 # Reduce quantity of the limit level and its head simultaneously
                 head_order.quantity -= order.quantity
                 best_value.quantity -= order.quantity
                 order.quantity = 0
             else:
+                # Deplete the head order quantity and subtract matching order quantity
                 order.quantity -= head_order.quantity
                 best_value.quantity -= order.quantity
                 head_order.quantity = 0
@@ -243,7 +246,9 @@ class LimitOrderBook:
                 # Remove empty order and remove its corresponding quantity
                 del self.orders[self._pop_limit(best_value)]
 
-            if best_value.quantity <= 0 and best_value.price in (order_tree := self.bids if order.is_bid else self.asks):
+            if best_value.quantity <= 0 and best_value.price in (
+                    order_tree := self.bids if order.is_bid else self.asks
+            ):
                 # delete order id from order_tree
                 del order_tree[best_value.price]
 
