@@ -110,6 +110,7 @@ class LimitOrderBook:
         # Price level does not exist already
         if order.price not in order_tree:
             self.orders[order.id] = order
+            order_tree[order.price] = LimitLevel(order)
 
             if order.is_bid and (best_ask := self.get_best_ask()) is not None:
                 if best_ask is not None and best_ask.price <= order.price:
@@ -120,8 +121,6 @@ class LimitOrderBook:
                 if best_bid is not None and best_bid.price >= order.price:
                     self.match_orders(order, best_bid)
                     return
-            if order.quantity > 0:
-                order_tree[order.price] = LimitLevel(order)
         else:
             # Check if bid crosses spread to match an ask
             if order.is_bid and (best_ask := self.get_best_ask()) is not None:
@@ -288,6 +287,9 @@ class LimitOrderBook:
                 order.quantity -= head_order.quantity
                 best_value.quantity -= order.quantity
                 head_order.quantity = 0
+
+            if order.quantity == 0 and order.id in self.orders:
+                self.cancel(order.id)
 
             if head_order.quantity == 0:
                 # Remove empty order and remove its corresponding quantity
