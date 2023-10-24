@@ -6,27 +6,24 @@ class LOBException(Exception):
     """
     Raised when an exception occurs within a limit order book
     """
+
     ...
 
 
 class Order:
-    def __init__(
-            self,
-            is_bid: bool,
-            quantity: int,
-            price: int,
-            id: int
-    ):
+    def __init__(self, is_bid: bool, quantity: int, price: int, id: int):
         self.is_bid = is_bid
         self.quantity = quantity
         self.price = price
         self.id = id
 
     def __str__(self):
-        return f"Order({'BID' if self.is_bid else 'ASK'}, " \
-               f"quantity={self.quantity}, " \
-               f"price={self.price}, " \
-               f"id={self.id})"
+        return (
+            f"Order({'BID' if self.is_bid else 'ASK'}, "
+            f"quantity={self.quantity}, "
+            f"price={self.price}, "
+            f"id={self.id})"
+        )
 
     def __repr__(self):
         return self.__str__()
@@ -103,7 +100,9 @@ class LimitOrderBook:
 
     def _add_order(self, order: Order):
         if order.id in self.orders:
-            raise LOBException(f"Order with existing ID {order.id} attempted to be added to LimitOrderBook")
+            raise LOBException(
+                f"Order with existing ID {order.id} attempted to be added to LimitOrderBook"
+            )
 
         # Determine whether order is a bid or an ask
         order_tree = self.bids if order.is_bid else self.asks
@@ -192,7 +191,9 @@ class LimitOrderBook:
                     new_id = order_adder(quantity, price)
             return new_id
         else:
-            raise LOBException("Attempted to update order which does not exist / no longer exists")
+            raise LOBException(
+                "Attempted to update order which does not exist / no longer exists"
+            )
 
     def cancel(self, order_id: int):
         if order_id in self.orders:
@@ -221,7 +222,11 @@ class LimitOrderBook:
         if best_value is None:
             return
         print(best_value)
-        while best_value.quantity > 0 and order.quantity > 0 and best_value.orders.head is not None:
+        while (
+            best_value.quantity > 0
+            and order.quantity > 0
+            and best_value.orders.head is not None
+        ):
             # Gets the order object from the LimitLevel's stored id
             order_id = best_value.orders.head.value
             if order_id in self.orders:
@@ -247,7 +252,7 @@ class LimitOrderBook:
                 del self.orders[self._pop_limit(best_value)]
 
             if best_value.quantity <= 0 and best_value.price in (
-                    order_tree := self.bids if order.is_bid else self.asks
+                order_tree := self.bids if order.is_bid else self.asks
             ):
                 # delete order id from order_tree
                 del order_tree[best_value.price]

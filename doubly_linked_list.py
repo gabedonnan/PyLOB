@@ -1,5 +1,5 @@
 class Node:
-    def __init__(self, value, prev: 'Node' = None, next: 'Node' = None):
+    def __init__(self, value, prev: "Node" = None, next: "Node" = None):
         self.value = value
         self.prev = prev
         self.next = next
@@ -105,9 +105,3 @@ class DoublyLinkedList:
 
     def __len__(self):
         return self.length
-
-
-
-
-
-
