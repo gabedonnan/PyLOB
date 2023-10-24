@@ -263,7 +263,7 @@ class LimitOrderBook:
     def match_orders(self, order: Order, best_value: LimitLevel):
         if best_value is None:
             return
-        print(best_value)
+
         while (
             best_value.quantity > 0
             and order.quantity > 0
