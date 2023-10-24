@@ -143,6 +143,48 @@ class LimitOrderBook:
     def _update_order(self, order: Order):
         return self.update(order.id, order.price, order.quantity)
 
+    def read_file(
+        self, fname: str, line_format: str = "{Type},{ID},{Price},{Quantity}"
+    ) -> set[int]:
+        """
+        :param fname: file name
+        :param line_format: Format of file lines to read
+
+        line_format structured like: "{Type},{ID},{Price},{Quantity}", with Type, ID, Price and Quantity in any order.
+        {ID} is disregarded as the LOB does ID assignment by itself
+
+        Any fields that are not any of these can be marked with a {*}, {}, or simply left as a space between commas
+        """
+
+        # Dictionary mapping locations to Type, Price and Quantity
+        # ID is not mapped as it is overwritten
+        split_format = {
+            item: i
+            for i, item in enumerate(line_format.split(","))
+            if item
+            in {
+                "{Type}",
+                "{Price}",
+                "{Quantity}",
+            }
+        }
+        ids = set()
+
+        with open(fname, "r") as file:
+            for line in file.readlines():
+                split_line = line.split(",")
+
+                tx_type = split_line[split_format["{Type}"]]
+                price = int(split_line[split_format["{Price}"]])
+                quantity = int(split_line[split_format["{Quantity}"]])
+
+                if tx_type.lower() in {"b", "bid", "buy"}:
+                    ids.add(self.bid(quantity=quantity, price=price))
+                else:
+                    ids.add(self.ask(quantity=quantity, price=price))
+
+        return ids
+
     def bid(self, quantity: int, price: int) -> int:
         order = Order(True, quantity, price, self.order_id)
         self._add_order(order)
