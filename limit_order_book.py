@@ -1,3 +1,5 @@
+import threading
+
 from doubly_linked_list import DoublyLinkedList, Node
 from sortedcontainers import SortedDict
 
@@ -65,6 +67,9 @@ class LimitOrderBook:
         # ID for the next order to be generated
         self.order_id = 0
 
+        # Threading lock to ensure thread safety
+        self.lock = threading.Lock()
+
     def __str__(self):
         return f"""LimitOrderBook(
             orders={self.orders}, 
@@ -98,7 +103,7 @@ class LimitOrderBook:
         limit_level.append(order)
         limit_level.quantity += order.quantity
 
-    def _add_order(self, order: Order):
+    def _add_order(self, order: Order, acquire_locks: bool = True):
         if order.id in self.orders:
             raise LOBException(
                 f"Order with existing ID {order.id} attempted to be added to LimitOrderBook"
@@ -108,36 +113,79 @@ class LimitOrderBook:
         order_tree = self.bids if order.is_bid else self.asks
 
         # Price level does not exist already
-        if order.price not in order_tree:
+        if order.is_bid and (best_ask := self.get_best_ask()) is not None:
+            if best_ask.price <= order.price:
+                if acquire_locks:
+                    self.lock.acquire()
+                self._match_orders(order, best_ask)
+                if acquire_locks:
+                    self.lock.release()
+                return
+
+        # Check if ask crosses spread to match a bid
+        elif not order.is_bid and (best_bid := self.get_best_bid()) is not None:
+            if best_bid.price >= order.price:
+                if acquire_locks:
+                    self.lock.acquire()
+                self._match_orders(order, best_bid)
+                if acquire_locks:
+                    self.lock.release()
+                return
+
+        if order.quantity > 0:
             self.orders[order.id] = order
-            order_tree[order.price] = LimitLevel(order)
-
-            if order.is_bid and (best_ask := self.get_best_ask()) is not None:
-                if best_ask is not None and best_ask.price <= order.price:
-                    self.match_orders(order, best_ask)
-                    return
-            # Check if ask crosses spread to match a bid
-            elif not order.is_bid and (best_bid := self.get_best_bid()) is not None:
-                if best_bid is not None and best_bid.price >= order.price:
-                    self.match_orders(order, best_bid)
-                    return
-        else:
-            # Check if bid crosses spread to match an ask
-            if order.is_bid and (best_ask := self.get_best_ask()) is not None:
-                if best_ask is not None and best_ask.price <= order.price:
-                    self.match_orders(order, best_ask)
-                    return
-            # Check if ask crosses spread to match a bid
-            elif not order.is_bid and (best_bid := self.get_best_bid()) is not None:
-                if best_bid is not None and best_bid.price >= order.price:
-                    self.match_orders(order, best_bid)
-                    return
-
-            # Adds order id to order tracker
-            if order.quantity > 0:
-                self.orders[order.id] = order
-                # Adds bids to bid tree and asks to ask tree
+            if order.price not in order_tree:
+                order_tree[order.price] = LimitLevel(order)
+            else:
                 self._append_limit(order_tree[order.price], order)
+
+    def _match_orders(self, order: Order, best_value: LimitLevel):
+        if best_value is None:
+            return
+
+        while (
+            best_value.quantity > 0
+            and order.quantity > 0
+            and best_value.orders.head is not None
+        ):
+            # Gets the order object from the LimitLevel's stored id
+            order_id = best_value.orders.head.value
+            if order_id in self.orders:
+                head_order = self.orders[best_value.orders.head.value]
+            else:
+                # Remove orders that have been cancelled
+                best_value.pop_left()
+                continue
+
+            if order.quantity <= head_order.quantity:
+                # Reduce quantity of the limit level and its head simultaneously
+                head_order.quantity -= order.quantity
+                best_value.quantity -= order.quantity
+                order.quantity = 0
+            else:
+                # Deplete the head order quantity and subtract matching order quantity
+                best_value.quantity -= order.quantity
+                order.quantity -= head_order.quantity
+                head_order.quantity = 0
+
+            if order.quantity == 0 and order.id in self.orders:
+                self.cancel(order.id)
+
+            if head_order.quantity == 0 and head_order.id in self.orders:
+                # Remove empty order and remove its corresponding quantity
+                del self.orders[self._pop_limit(best_value)]
+
+        if best_value.quantity <= 0 and best_value.price in (
+            order_tree := self.asks if order.is_bid else self.bids
+        ):
+            # delete order id from order_tree
+            del order_tree[best_value.price]
+
+        if order.quantity > 0:
+            if order.id in self.orders:
+                self._update_order(order)
+            else:
+                self._add_order(order, False)
 
     def _update_order(self, order: Order):
         return self.update(order.id, order.price, order.quantity)
@@ -185,15 +233,19 @@ class LimitOrderBook:
         return ids
 
     def bid(self, quantity: int, price: int) -> int:
+        self.lock.acquire()
         order = Order(True, quantity, price, self.order_id)
-        self._add_order(order)
         self.order_id += 1
+        self.lock.release()
+        self._add_order(order)
         return order.id
 
     def ask(self, quantity: int, price: int) -> int:
+        self.lock.acquire()
         order = Order(False, quantity, price, self.order_id)
-        self._add_order(order)
         self.order_id += 1
+        self.lock.release()
+        self._add_order(order)
         return order.id
 
     def update(self, order_id: int, price: int, quantity: int) -> int | None:
@@ -258,51 +310,3 @@ class LimitOrderBook:
             return self.asks.peekitem(0)[1]
         except IndexError:
             return None
-
-    def match_orders(self, order: Order, best_value: LimitLevel):
-        if best_value is None:
-            return
-
-        while (
-            best_value.quantity > 0
-            and order.quantity > 0
-            and best_value.orders.head is not None
-        ):
-            # Gets the order object from the LimitLevel's stored id
-            order_id = best_value.orders.head.value
-            if order_id in self.orders:
-                head_order = self.orders[best_value.orders.head.value]
-            else:
-                # Remove orders that have been cancelled
-                best_value.pop_left()
-                continue
-
-            if order.quantity <= head_order.quantity:
-                # Reduce quantity of the limit level and its head simultaneously
-                head_order.quantity -= order.quantity
-                best_value.quantity -= order.quantity
-                order.quantity = 0
-            else:
-                # Deplete the head order quantity and subtract matching order quantity
-                order.quantity -= head_order.quantity
-                best_value.quantity -= order.quantity
-                head_order.quantity = 0
-
-            if order.quantity == 0 and order.id in self.orders:
-                self.cancel(order.id)
-
-            if head_order.quantity == 0:
-                # Remove empty order and remove its corresponding quantity
-                del self.orders[self._pop_limit(best_value)]
-
-            if best_value.quantity <= 0 and best_value.price in (
-                order_tree := self.bids if order.is_bid else self.asks
-            ):
-                # delete order id from order_tree
-                del order_tree[best_value.price]
-
-        if order.quantity > 0:
-            if order.id in self.orders:
-                self._update_order(order)
-            else:
-                self._add_order(order)
