@@ -1,6 +1,6 @@
 import threading
 
-from doubly_linked_list import DoublyLinkedList, Node
+from collections import deque
 from sortedcontainers import SortedDict
 
 
@@ -37,25 +37,24 @@ class Order:
 class LimitLevel:
     def __init__(self, order: Order):
         self.price = order.price
-        self.orders = DoublyLinkedList()
-        self.orders.append(Node(order.id))
+        self.orders = deque([order.id])
         self.quantity = order.quantity
 
     def __str__(self):
-        return f"LimitLevel(price={self.price}, quantity={self.quantity}, order_ids={self.orders.head.__str__()})"
+        return f"LimitLevel(price={self.price}, quantity={self.quantity}, order_ids={self.orders})"
 
     def __repr__(self):
         return self.__str__()
 
     def append(self, order: Order):
-        self.orders.append(Node(order.id))
+        self.orders.append(order.id)
 
     def pop_left(self) -> int:
-        return self.orders.pop_left().value
+        return self.orders.popleft()
 
 
 class LimitOrderBook:
-    def __init__(self):
+    def __init__(self, title: str = "", currency_symbol: str = ""):
         # Contain LimitLevel objects keyed by price, which are doubly linked lists holding nodes, quantities and prices
         # Each node contains an order ID, not the order itself
         self.bids = SortedDict()
@@ -70,12 +69,21 @@ class LimitOrderBook:
         # Threading lock to ensure thread safety
         self.lock = threading.Lock()
 
+        # LOB title
+        self.title = title
+
+        # Currency symbol for string representation
+        self.currency_symbol = currency_symbol
+
     def __str__(self):
-        return f"""LimitOrderBook(
-            orders={self.orders}, 
-            bid_tree={self.bids}, 
-            ask_tree={self.asks}
-        )"""
+        final_str_list = [f"LimitOrderBook {self.title}", "BIDS:"]
+        for price, level in self.bids.items():
+            final_str_list.append(f"    {level.quantity} @ {self.currency_symbol}{price}")
+
+        final_str_list.append("ASKS:")
+        for price, level in self.asks.items():
+            final_str_list.append(f"    {level.quantity} @ {self.currency_symbol}{price}")
+        return "\n".join(final_str_list)
 
     def __repr__(self):
         return self.__str__()
@@ -146,12 +154,12 @@ class LimitOrderBook:
         while (
             best_value.quantity > 0
             and order.quantity > 0
-            and best_value.orders.head is not None
+            and best_value.orders[0] is not None
         ):
             # Gets the order object from the LimitLevel's stored id
-            order_id = best_value.orders.head.value
+            order_id = best_value.orders[0]
             if order_id in self.orders:
-                head_order = self.orders[best_value.orders.head.value]
+                head_order = self.orders[best_value.orders[0]]
             else:
                 # Remove orders that have been cancelled
                 best_value.pop_left()
@@ -248,7 +256,7 @@ class LimitOrderBook:
         self._add_order(order)
         return order.id
 
-    def update(self, order_id: int, price: int, quantity: int) -> int | None:
+    def update(self, order_id: int, quantity: int, price: int) -> int | None:
         """
         Updates an order, retrieved by order id.
         :param order_id: Order to update

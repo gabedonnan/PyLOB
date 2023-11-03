@@ -76,6 +76,6 @@ if __name__ == "__main__":
     # test_file("./LOBTests/MinimalTest.txt")
     # test_file("./LOBTests/MinimalTest2.txt")
     # stress_test_updating()
-    # stress_test_add_cancel()
+    stress_test_add_cancel()
     # stress_test_add_matching()
-    stress_test_multithread_matching()
+    # stress_test_multithread_matching()
