@@ -8,7 +8,6 @@ class LOBException(Exception):
     """
     Raised when an exception occurs within a limit order book
     """
-
     ...
 
 
