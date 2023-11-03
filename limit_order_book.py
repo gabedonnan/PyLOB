@@ -1,5 +1,6 @@
 import threading
 
+from statistics import mean
 from collections import deque
 from sortedcontainers import SortedDict
 
@@ -40,7 +41,7 @@ class LimitLevel:
         self.quantity = order.quantity
 
     def __str__(self):
-        return f"LimitLevel(price={self.price}, quantity={self.quantity}, order_ids={self.orders})"
+        return f"LimitLevel\n{self.quantity} @ {self.price}\nOrder IDs:\n  {self.orders}"
 
     def __repr__(self):
         return self.__str__()
@@ -75,13 +76,17 @@ class LimitOrderBook:
         self.currency_symbol = currency_symbol
 
     def __str__(self):
-        final_str_list = [f"LimitOrderBook {self.title}", "BIDS:"]
+        final_str_list = [f"LimitOrderBook {self.title}", f"Microprice: {self.microprice}", "BIDS:"]
         for price, level in self.bids.items():
-            final_str_list.append(f"    {level.quantity} @ {self.currency_symbol}{price}")
+            final_str_list.append(
+                f"    {level.quantity} @ {self.currency_symbol}{price}"
+            )
 
         final_str_list.append("ASKS:")
         for price, level in self.asks.items():
-            final_str_list.append(f"    {level.quantity} @ {self.currency_symbol}{price}")
+            final_str_list.append(
+                f"    {level.quantity} @ {self.currency_symbol}{price}"
+            )
         return "\n".join(final_str_list)
 
     def __repr__(self):
@@ -120,7 +125,7 @@ class LimitOrderBook:
         order_tree = self.bids if order.is_bid else self.asks
 
         # Price level does not exist already
-        if order.is_bid and (best_ask := self.get_best_ask()) is not None:
+        if order.is_bid and (best_ask := self.best_ask) is not None:
             if best_ask.price <= order.price:
                 if acquire_locks:
                     self.lock.acquire()
@@ -130,7 +135,7 @@ class LimitOrderBook:
                 return
 
         # Check if ask crosses spread to match a bid
-        elif not order.is_bid and (best_bid := self.get_best_bid()) is not None:
+        elif not order.is_bid and (best_bid := self.best_bid) is not None:
             if best_bid.price >= order.price:
                 if acquire_locks:
                     self.lock.acquire()
@@ -306,14 +311,32 @@ class LimitOrderBook:
                 del order_tree[price_level.price]
             del self.orders[order_id]
 
-    def get_best_bid(self):
+    @property
+    def best_bid(self):
         try:
             return self.bids.peekitem()[1]
         except IndexError:
             return None
 
-    def get_best_ask(self):
+    @property
+    def best_ask(self):
         try:
             return self.asks.peekitem(0)[1]
         except IndexError:
             return None
+
+    @property
+    def midprice(self) -> float | None:
+        best_ask = self.best_ask
+        best_bid = self.best_bid
+        if best_bid is not None and best_ask is not None:
+            return mean((self.best_ask.price, self.best_bid.price))
+
+    @property
+    def microprice(self) -> float | None:
+        best_ask = self.best_ask
+        best_bid = self.best_bid
+        if best_bid is not None and best_ask is not None:
+            return (
+                (best_bid.quantity * best_ask.price) + (best_ask.quantity * best_bid.price)
+            ) / (best_bid.quantity + best_ask.quantity)

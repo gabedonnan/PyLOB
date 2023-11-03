@@ -8,7 +8,7 @@ from limit_order_book import LimitOrderBook
 def test_file(fname: str):
     x = LimitOrderBook()
     x.read_file(fname)
-    print(x)
+    print(x.best_ask)
 
 
 def stress_test_adding():
@@ -74,7 +74,7 @@ def stress_test_multithread_matching():
 
 if __name__ == "__main__":
     test_file("./LOBTests/MinimalTest.txt")
-    test_file("./LOBTests/MinimalTest2.txt")
+    # test_file("./LOBTests/MinimalTest2.txt")
     # stress_test_updating()
     # stress_test_add_cancel()
     # stress_test_add_matching()
