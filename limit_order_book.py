@@ -425,6 +425,10 @@ class LimitOrderBook:
             del self.orders[order_id]
 
     @property
+    def match_history_prices(self):
+        return [match["matched_order"].price for match in self.match_history]
+
+    @property
     def best_bid(self) -> LimitLevel | None:
         if len(self.bids) != 0:
             return self.bids.peekitem()[1]

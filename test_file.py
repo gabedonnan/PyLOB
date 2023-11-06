@@ -2,6 +2,8 @@ import random
 import threading
 from time import time
 
+import matplotlib.pyplot as plt
+
 from limit_order_book import LimitOrderBook, Trader
 
 
@@ -58,7 +60,7 @@ def threading_helper_add_cancel(lob: LimitOrderBook):
 
 def stress_test_multithread_matching():
     x = LimitOrderBook()
-    t0 = time()
+
     for i in range(10):
         t = threading.Thread(target=threading_helper_add_cancel, args=(x,))
         t.start()
@@ -68,14 +70,14 @@ def stress_test_multithread_matching():
         if t is not cur_thread:
             t.join()
 
-    print(x)
-    print(time() - t0)
+    plt.plot(x.match_history_prices)
+    plt.show()
 
 
 def trader_tests():
     x = LimitOrderBook(asset_name="APL", record_match_history=True)
-    trader_one = Trader()
-    trader_two = Trader()
+    trader_one = Trader("Steben")
+    trader_two = Trader("Bobe")
 
     x.ask(1, 100, trader_one)
     x.bid(1, 100, trader_two)
@@ -92,5 +94,5 @@ if __name__ == "__main__":
     # stress_test_updating()
     # stress_test_add_cancel()
     # stress_test_add_matching()
-    # stress_test_multithread_matching()
-    trader_tests()
+    stress_test_multithread_matching()
+    # trader_tests()
