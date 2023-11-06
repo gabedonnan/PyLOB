@@ -183,7 +183,7 @@ class LimitOrderBook:
         while (
             best_value.quantity > 0
             and order.quantity > 0
-            and best_value.orders[0] is not None
+            and len(best_value.orders) > 0
         ):
             # Gets the order object from the LimitLevel's stored id
             head_order_id = best_value.orders[0]
