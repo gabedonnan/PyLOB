@@ -2,13 +2,13 @@ import random
 import threading
 from time import time
 
-from limit_order_book import LimitOrderBook
+from limit_order_book import LimitOrderBook, Trader
 
 
 def test_file(fname: str):
     x = LimitOrderBook()
     x.read_file(fname)
-    print(x.best_ask)
+    print(x)
 
 
 def stress_test_adding():
@@ -38,7 +38,7 @@ def stress_test_add_cancel():
 
 
 def stress_test_add_matching():
-    x = LimitOrderBook()
+    x = LimitOrderBook(record_match_history=False)
     t0 = time()
     for i in range(1_000_000):
         x.bid(10, 10)
@@ -72,10 +72,32 @@ def stress_test_multithread_matching():
     print(time() - t0)
 
 
+def trader_tests():
+    x = LimitOrderBook(asset_name="APL")
+    t0 = time()
+    trader_one = Trader()
+    for i in range(10):
+        x.ask(10, 8, trader_one)
+        print(trader_one)
+
+    trader_two = Trader()
+    for i in range(10):
+        x.bid(5, 10, trader_two)
+        print(trader_one, trader_two)
+
+    for i in range(10):
+        x.ask(5, 7, trader_two)
+
+    for i in range(10):
+        x.bid(5, 7, trader_one)
+        print(trader_one, trader_two)
+
+
 if __name__ == "__main__":
-    test_file("./LOBTests/MinimalTest.txt")
+    # test_file("./LOBTests/MinimalTest.txt")
     # test_file("./LOBTests/MinimalTest2.txt")
     # stress_test_updating()
     # stress_test_add_cancel()
     # stress_test_add_matching()
     # stress_test_multithread_matching()
+    trader_tests()

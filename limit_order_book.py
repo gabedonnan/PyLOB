@@ -3,6 +3,8 @@ import threading
 from statistics import mean
 from collections import deque
 from sortedcontainers import SortedDict
+from copy import deepcopy
+from time import time
 
 
 class LOBException(Exception):
@@ -13,11 +15,12 @@ class LOBException(Exception):
 
 
 class Order:
-    def __init__(self, is_bid: bool, quantity: int, price: int, id: int):
+    def __init__(self, is_bid: bool, quantity: int, price: int, id: int, trader: "Trader"):
         self.is_bid = is_bid
         self.quantity = quantity
         self.price = price
         self.id = id
+        self.trader = trader
 
     def __str__(self):
         return (
@@ -54,7 +57,7 @@ class LimitLevel:
 
 
 class LimitOrderBook:
-    def __init__(self, title: str = "", currency_symbol: str = ""):
+    def __init__(self, asset_name: str = "", currency_symbol: str = "", record_match_history: bool = False):
         # Contain LimitLevel objects keyed by price, which are doubly linked lists holding nodes, quantities and prices
         # Each node contains an order ID, not the order itself
         self.bids = SortedDict()
@@ -70,13 +73,21 @@ class LimitOrderBook:
         self.lock = threading.Lock()
 
         # LOB title
-        self.title = title
+        self.asset = asset_name
 
         # Currency symbol for string representation
         self.currency_symbol = currency_symbol
 
+        # List of order matches
+        self.record_match_history = record_match_history
+        self.match_history = []
+
     def __str__(self):
-        final_str_list = [f"LimitOrderBook {self.title}", f"Microprice: {self.microprice}", "BIDS:"]
+        final_str_list = [
+            f"LimitOrderBook {self.asset}",
+            f"Midprice: {self.midprice}",
+            "BIDS:"
+        ]
         for price, level in self.bids.items():
             final_str_list.append(
                 f"    {level.quantity} @ {self.currency_symbol}{price}"
@@ -155,6 +166,8 @@ class LimitOrderBook:
         if best_value is None:
             return
 
+        order_multiplier, matched_order_multiplier = (1, -1) if order.is_bid else (-1, 1)
+
         while (
             best_value.quantity > 0
             and order.quantity > 0
@@ -169,14 +182,67 @@ class LimitOrderBook:
                 best_value.pop_left()
                 continue
 
+            if self.record_match_history:
+                self.match_history.append({
+                    "incoming_order": deepcopy(order),
+                    "matched_order": deepcopy(head_order),
+                    "timestamp": time()
+                })
+
             if order.quantity <= head_order.quantity:
+                # Manage distribution of quantity owned and balance of accounts
+
+                # If the order is bid, subtract balance equal to price bought (bounded by price of the matched order)
+                # Then add quantity owned of that asset, do opposite if is an ask
+                if order.trader is not None:
+                    # The price a trade is matched at is always the head order's price
+                    order.trader.balance += -order_multiplier * head_order.price * order.quantity
+
+                    # Check if trader owns the asset, then changes quantity owned depending whether order was bid / ask
+                    if self.asset in order.trader.owned:
+                        order.trader.owned[self.asset] += order_multiplier * order.quantity
+                    else:
+                        order.trader.owned[self.asset] = order_multiplier * order.quantity
+
+                if head_order.trader is not None:
+                    head_order.trader.balance += -matched_order_multiplier * head_order.price * order.quantity
+
+                    # Adjust quantities of matched order
+                    if self.asset in head_order.trader.owned:
+                        head_order.trader.owned[self.asset] += matched_order_multiplier * order.quantity
+                    else:
+                        head_order.trader.owned[self.asset] = matched_order_multiplier * order.quantity
+
                 # Reduce quantity of the limit level and its head simultaneously
                 head_order.quantity -= order.quantity
                 best_value.quantity -= order.quantity
                 order.quantity = 0
             else:
+                # Manage distribution of quantity owned and balance of accounts
+
+                # If the order is bid, subtract balance equal to price bought (bounded by price of the matched order)
+                # Then add quantity owned of that asset, do opposite if is an ask
+                if order.trader is not None:
+                    # The price a trade is matched at is always the head order's price
+                    order.trader.balance += -order_multiplier * head_order.price * head_order.quantity
+
+                    # Check if trader owns the asset, then changes quantity owned depending whether order was bid / ask
+                    if self.asset in order.trader.owned:
+                        order.trader.owned[self.asset] += order_multiplier * head_order.quantity
+                    else:
+                        order.trader.owned[self.asset] = order_multiplier * head_order.quantity
+
+                if head_order.trader is not None:
+                    head_order.trader.balance += -matched_order_multiplier * head_order.price * head_order.quantity
+
+                    # Adjust quantities of matched order
+                    if self.asset in head_order.trader.owned:
+                        head_order.trader.owned[self.asset] += matched_order_multiplier * head_order.quantity
+                    else:
+                        head_order.trader.owned[self.asset] = matched_order_multiplier * head_order.quantity
+
                 # Deplete the head order quantity and subtract matching order quantity
-                best_value.quantity -= order.quantity
+                best_value.quantity -= head_order.quantity
                 order.quantity -= head_order.quantity
                 head_order.quantity = 0
 
@@ -244,33 +310,34 @@ class LimitOrderBook:
 
         return ids
 
-    def bid(self, quantity: int, price: int) -> int:
+    def bid(self, quantity: int, price: int, trader: "Trader | None" = None) -> int:
         self.lock.acquire()
-        order = Order(True, quantity, price, self.order_id)
+        order = Order(True, quantity, price, self.order_id, trader)
         self.order_id += 1
         self.lock.release()
         self._add_order(order)
         return order.id
 
-    def ask(self, quantity: int, price: int) -> int:
+    def ask(self, quantity: int, price: int, trader: "Trader | None" = None) -> int:
         self.lock.acquire()
-        order = Order(False, quantity, price, self.order_id)
+        order = Order(False, quantity, price, self.order_id, trader)
         self.order_id += 1
         self.lock.release()
         self._add_order(order)
         return order.id
 
-    def update(self, order_id: int, quantity: int, price: int) -> int | None:
+    def update(self, order_id: int, quantity: int, price: int, trader: "Trader | None" = None) -> int | None:
         """
         Updates an order, retrieved by order id.
         :param order_id: Order to update
         :param price: Price to change order to, a change here will result in an order cancellation and re-adding
         :param quantity: Quantity to change order to
+        :param trader: The trader from which the original order originated
         :return: New order id if quantity > 0 else None. The result may be the same as previous ID.
         """
         if quantity == 0:
             self.cancel(order_id)
-        elif order_id in self.orders:
+        elif order_id in self.orders and self.orders[order_id].trader is trader:
             order_tree = self.bids if self.orders[order_id].is_bid else self.asks
             price_difference = self.orders[order_id].price - price
             # Manages price adjustment
@@ -279,7 +346,7 @@ class LimitOrderBook:
                 # This is most easily done by deleting one order and creating a new one in a different price layer
                 order_adder = self.bid if self.orders[order_id].is_bid else self.ask
                 self.cancel(order_id)
-                new_id = order_adder(quantity, price)
+                new_id = order_adder(quantity, price, trader)
             else:
                 # Manages quantity adjustment
                 quantity_difference = self.orders[order_id].quantity - quantity
@@ -293,15 +360,19 @@ class LimitOrderBook:
                     # Obeys price-time priority, an increase in quantity means order is moved to back of queue
                     order_adder = self.bid if self.orders[order_id].is_bid else self.ask
                     self.cancel(order_id)
-                    new_id = order_adder(quantity, price)
+                    new_id = order_adder(quantity, price, trader)
             return new_id
+        elif order_id in self.orders:
+            raise LOBException(
+                "Attempted to update order for which you are not the owner"
+            )
         else:
             raise LOBException(
                 "Attempted to update order which does not exist / no longer exists"
             )
 
-    def cancel(self, order_id: int):
-        if order_id in self.orders:
+    def cancel(self, order_id: int, trader: "Trader | None" = None):
+        if order_id in self.orders and self.orders[order_id].trader is trader:
             order_tree = self.bids if self.orders[order_id].is_bid else self.asks
             price_level = order_tree[self.orders[order_id].price]
             # Remove quantity of removed order
@@ -312,25 +383,23 @@ class LimitOrderBook:
             del self.orders[order_id]
 
     @property
-    def best_bid(self):
-        try:
+    def best_bid(self) -> LimitLevel | None:
+        if len(self.bids) != 0:
             return self.bids.peekitem()[1]
-        except IndexError:
-            return None
+        return None
 
     @property
-    def best_ask(self):
-        try:
+    def best_ask(self) -> LimitLevel | None:
+        if len(self.asks) != 0:
             return self.asks.peekitem(0)[1]
-        except IndexError:
-            return None
+        return None
 
     @property
     def midprice(self) -> float | None:
         best_ask = self.best_ask
         best_bid = self.best_bid
         if best_bid is not None and best_ask is not None:
-            return mean((self.best_ask.price, self.best_bid.price))
+            return mean((best_ask.price, best_bid.price))
 
     @property
     def microprice(self) -> float | None:
@@ -340,3 +409,12 @@ class LimitOrderBook:
             return (
                 (best_bid.quantity * best_ask.price) + (best_ask.quantity * best_bid.price)
             ) / (best_bid.quantity + best_ask.quantity)
+
+
+class Trader:
+    def __init__(self):
+        self.balance = 0
+        self.owned = {}
+
+    def __str__(self):
+        return f"Trader(balance={self.balance}, owned={self.owned})"
