@@ -73,24 +73,17 @@ def stress_test_multithread_matching():
 
 
 def trader_tests():
-    x = LimitOrderBook(asset_name="APL")
-    t0 = time()
+    x = LimitOrderBook(asset_name="APL", record_match_history=True)
     trader_one = Trader()
-    for i in range(10):
-        x.ask(10, 8, trader_one)
-        print(trader_one)
-
     trader_two = Trader()
-    for i in range(10):
-        x.bid(5, 10, trader_two)
-        print(trader_one, trader_two)
 
-    for i in range(10):
-        x.ask(5, 7, trader_two)
+    x.ask(1, 100, trader_one)
+    x.bid(1, 100, trader_two)
 
-    for i in range(10):
-        x.bid(5, 7, trader_one)
-        print(trader_one, trader_two)
+    x.bid(1, 50, trader_one)
+    x.ask(1, 50, trader_two)
+
+    print(trader_one, trader_two)
 
 
 if __name__ == "__main__":
